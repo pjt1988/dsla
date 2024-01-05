@@ -1,0 +1,7 @@
+.vscode
+*.o
+*.obj
+*.exe
+*.bat
+*.dat
+dsla
