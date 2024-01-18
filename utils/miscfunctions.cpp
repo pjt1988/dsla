@@ -20,8 +20,6 @@ namespace DSLA{
     std::uniform_real_distribution<double> urd(min,max);
   
     std::generate(mat, (mat)+dim, [&]{ return urd(eng);});
-    for(auto i=nrow - 10;i<nrow;++i)
-        printf("i=%lu, buf[i*nrow+i] = %.3f \n", i, mat[i*nrow+i]);
 
     if(dropOff){
       for(auto i=0ul;i<nrow;++i){
@@ -92,15 +90,5 @@ namespace DSLA{
     return sum;
   }
 
-  void printMatrix(double* mat, const size_t nrow, const size_t ncol){
-    printf("\n");
-    for(auto i=0ul;i<nrow;++i){
-      for(auto j=0ul;j<ncol;++j){
-        printf("%.6f ", mat[i*nrow+j]);
-      }
-      printf("\n");
-    }
-    printf("\n");
-  }
 
 }

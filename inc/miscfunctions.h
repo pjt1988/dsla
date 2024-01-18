@@ -1,6 +1,7 @@
 #ifndef MISC_FUNCTIONS_H_
 #define MISC_FUNCTIONS_H_
 
+#include <iostream>
 #include <cstddef>
 
 namespace DSLA{
@@ -20,7 +21,19 @@ namespace DSLA{
   double _dsubS(double* __restrict__ mat, const double* __restrict__ rhs, const size_t dim);
 
 
-  void printMatrix(double* mat, const size_t nrow, const size_t ncol);
+  template<class T>
+  void printMatrix(T* mat, const size_t nrow, const size_t ncol){
+    printf("\n");
+    for(auto i=0ul;i<nrow;++i){
+      for(auto j=0ul;j<ncol;++j){
+        std::cout << mat[i*nrow+j] << " ";
+        //std::cout << setprecision(6) << setw(9) << setfill(' ') << mat[i*nrow+j];
+        //printf("%.6f ", mat[i*nrow+j]);
+      }
+      std::cout << "\n";
+    }
+    std::cout << "\n";
+  }
 }
 
 #endif

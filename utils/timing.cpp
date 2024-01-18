@@ -7,6 +7,10 @@ namespace DSLA{
     const std::string enumAsString(const Timings& type){
         using enum Timings;
         switch(type){
+        case BCSR_READ:
+            return "BCSR::READ";
+        case BCSR_WRITE:
+            return "BCSR::WRITE";
         case BCSR_COPY:
             return "BCSR::COPY";
         case BCSR_ADD:
@@ -15,6 +19,10 @@ namespace DSLA{
             return "BCSR::SUB";
         case BCSR_SCALE:
             return "BCSR::SCALE";
+        case BCSR_TRANSPOSE:
+            return "BCSR::TRANSPOSE_IN_PLACE";
+        case BCSR_TRACE:
+            return "BCSR::TRACE";
         case MISC:
             return "Misc";
         default:

@@ -5,8 +5,10 @@
 #include "miscfunctions.h"
 #include "settings.h"
 
+#include <algorithm>
 #include <assert.h>
 #include <cstring>
+#include <execution>
 #include <limits>
 #include <math.h>
 #include <omp.h>
@@ -175,64 +177,123 @@ namespace DSLA{
     }
 
 
-std::pair<double,double> BCSRMatrix::gershgorinEstimate_old() const {
-    double* diags = new double[_blockSize];
-    double* sums  = new double[_blockSize];
+    void BCSRMatrix::transpose_in_place(){
 
-    double eps0 = 0.0;
-    double epsn = 0.0;
-    double disc_min[2] = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
-    double disc_max[2] = {std::numeric_limits<double>::min(), std::numeric_limits<double>::min()};
-    for(size_t i=0;i<_nbrY;i++){
-      size_t dim_row = _blockSize;
-      // diags...
-      double* Aact = _buffer[i+i*_nbrY];
-      if (Aact == NULL){
-        printf("Gershgorin..diag element of row i=%lu is zero!!\n", i);
-        die("zero diag-block?!?");
-      }    
-      for(size_t j=0;j<dim_row;++j){
-        sums[j]  = 0.0;
-        diags[j] = Aact[j+j*dim_row];
-      }    
-      for(size_t j=0;j<dim_row;++j){ // should be symmetric, so...
-        for(size_t k=0;k<j;++k)         sums[k] += fabs(Aact[j*dim_row+k]);
-        for(size_t k=j+1;k<dim_row;++k) sums[k] += fabs(Aact[j*dim_row+k]);
-      }    
-
-      for(size_t t=_rowPtr[i]; t<_rowPtr[i+1]; ++t){
-        size_t A_bcol = _colIndx[t];
-        if(A_bcol != i){
-          Aact = _buffer[A_bcol + i*_nbrY];
-          for(size_t j=0;j<dim_row;++j){
-            for(size_t k=0;k<dim_row;++k) sums[j] += fabs(Aact[k + j*dim_row]);
-            //Aact += dim_row; //talk about pointer arithmetic..
-          }
+        //std::swap is way too slow...
+ 
+        std::vector<std::vector<size_t> > sigCol(_nbrY);
+        std::vector<bool> doit(_nbrX*_nbrY,true);
+        double tmp{0.0};
+        
+        for(size_t i=0;i<_nbrY;++i){
+            for(size_t j=_rowPtr[i]; j<_rowPtr[i+1]; ++j){
+                const size_t icol = _colIndx[j];
+                sigCol[icol].emplace_back(i);
+                auto& mat0 = _buffer[icol + i*_nbrY];
+                if (i == icol){
+                    for(size_t t=0;t<_blockSize;++t){
+                        for(size_t jj=0;jj<t;++jj){
+                            tmp=mat0[t+jj*_blockSize];
+                            mat0[t+jj*_blockSize]=mat0[jj+t*_blockSize];
+                            mat0[jj+t*_blockSize]=tmp;
+                        }
+                    }
+                }else if(doit[icol+i*_nbrY] && doit[i+icol*_nbrY]){
+                    // check if we did this one already...
+                    auto& mat1 = _buffer[i + icol*_nbrY];
+                    if (mat1 == nullptr){
+                        mat1 = new double[_blockSize*_blockSize];
+                        for(size_t t=0;t<_blockSize;++t){
+                            for(size_t jj=0;jj<_blockSize;++jj){
+                                tmp = mat1[t+jj*_blockSize];
+                                mat1[t+jj*_blockSize] = mat0[jj+t*_blockSize];
+                                mat0[jj+t*_blockSize] = tmp;
+                            }
+                        }
+                        delete[] mat0;
+                        mat0 = nullptr;
+                    }else{
+                        for(size_t t=0;t<_blockSize;++t){
+                            for(size_t jj=0;jj<_blockSize;++jj){
+                                tmp = mat0[t+jj*_blockSize];
+                                mat0[t+jj*_blockSize] = mat1[jj+t*_blockSize];
+                                mat1[jj+t*_blockSize] = tmp;
+                            }
+                        }
+                    }
+                    tmp = _bNorms[i+icol*_nbrY];
+                    _bNorms[i+icol*_nbrY] = _bNorms[icol+i*_nbrY];
+                    _bNorms[icol+i*_nbrY] = tmp;
+                }
+                doit[icol+i*_nbrY]=false;
+                doit[i+icol*_nbrY]=false;
+            }
         }
-      }    
-
-      for(size_t j=0;j<dim_row;++j){ // should be symmetric, so...
-        if ((disc_max[0] + disc_max[1]) < (diags[j] + sums[j])){
-          disc_max[0] = diags[j];
-          disc_max[1] = sums[j];
-          epsn = disc_max[0] + disc_max[1];
+        _rowPtr[0] = 0;
+        size_t count = 0;
+        for(size_t i=0;i<_nbrY;++i){
+            memcpy(&_colIndx[count], &sigCol[i][0], sizeof(size_t) * sigCol[i].size());
+            count += sigCol[i].size();
+            _rowPtr[i+1] = count;
         }
-        if ((disc_min[0] - disc_min[1]) > (diags[j] - sums[j])){
-          disc_min[0] = diags[j];
-          disc_min[1] = sums[j];
-          eps0 = disc_min[0] - disc_min[1];
+
+    }
+
+    double BCSRMatrix::trace() const {
+        assert(_nbrX == _nbrY && _nrow == _ncol);
+
+        double sum = 0.0;        
+        const int nt{omp_get_num_threads() > (int)_nbrY ? omp_get_num_threads() : (int)_nbrY};
+
+        #pragma omp parallel for reduction(+:sum) num_threads(nt)
+        for(size_t i=0;i<_nbrY;++i){
+            assert(_buffer[i+i*_nbrY]);
+            const auto& mat = _buffer[i+i*_nbrY];
+            for(size_t j=0;j<_blockSize;++j){
+                sum += mat[j+j*_blockSize];
+            }
         }
-      }    
-    }    
+        return sum;
+    }
 
-    delete[] sums;
-    delete[] diags;
+    void BCSRMatrix::add_to_diag(const double v, const bool rebuildVecs){
+        const int nt{omp_get_num_threads() > (int)_nbrY ? omp_get_num_threads() : (int)_nbrY};
 
-    return std::make_pair(eps0,epsn);
+        const double fnIncr = _blockSize * v *v;
+        
+        #pragma omp parallel for num_threads(nt)
+        for(size_t i=0;i<_nbrY;++i){
+            assert(_buffer[i+i*_nbrY]);
+            const auto& mat = _buffer[i+i*_nbrY];
+            double fnSum = fnIncr;
+            for(size_t j=0;j<_blockSize;++j){
+                fnSum += mat[j+j*_blockSize]*v;
+                mat[j+j*_blockSize] += v;      
+            }
+            _bNorms[i+i*_nbrY] += fnSum;            
+        }
+        if(rebuildVecs){
+            rebuildIndxFromNorms();
+        }
+    }
 
-
-
-
+    void BCSRMatrix::add_to_diag(const std::vector<double>& v, const bool rebuildIndx){ 
+        const int nt{omp_get_num_threads() > (int)_nbrY ? omp_get_num_threads() : (int)_nbrY};
+        
+        #pragma omp parallel for num_threads(nt)
+        for(size_t i=0;i<_nbrY;++i){
+            assert(_buffer[i+i*_nbrY]);
+            const auto& mat = _buffer[i+i*_nbrY];
+            double fnSum = 0.0;
+            for(size_t j=0;j<_blockSize && i*_nbrY +j < v.size();++j){
+                fnSum += (mat[j+j*_blockSize] + v[i*_nbrY + j])*v[i*_nbrY + j];
+                mat[j+j*_blockSize] += v[i*_nbrY + j];
+            }
+            _bNorms[i+i*_nbrY] += fnSum;            
+        }
+        if(rebuildIndx){
+            rebuildIndxFromNorms();
+        }
     }
 
 

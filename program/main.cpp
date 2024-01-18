@@ -186,12 +186,55 @@ int main(){
 
 #endif
 
-  auto newG = c1.gershgorinEstimate();
-  auto oldG = c1.gershgorinEstimate_old();
+double* buf = new double[81];
+generateRandomMatrix(9,9,1.0,5.0,buf);
+for(int i=0;i<3;++i){
+  for(int j=6;j<9;++j){
+    buf[i*9+j] = 0.0;
+  }
+}
+BCSRMatrix tmat(9,9);
+tmat.generateBlocking(3,buf);
+tmat.print();
 
-  std::cout << "new G min " << newG.first << " max " << newG.second << std::endl;
-  std::cout << "old G min " << oldG.first << " max " << oldG.second << std::endl;
+printf("new transpose\n\n");
+tmat.transpose_in_place();
+tmat.print();
 
+
+#if 0
+double sum = 0.0;
+timer->start();
+for(auto i=0;i<50;++i){
+  c1.transpose_in_place();
+  sum += c1.norm();
+}
+timer->stop(Timings::BCSR_TRANSPOSE);
+std::cout << "summed norm is " << sum << std::endl;
+timer->printTimes();
+
+timer->reset(Timings::BCSR_TRANSPOSE);
+
+sum = 0.0;
+timer->start();
+for(auto i=0;i<50;++i){
+  c1.transpose_in_place_old();
+  sum += c1.norm();
+}
+timer->stop(Timings::BCSR_TRANSPOSE);
+std::cout << "summed norm is " << sum << std::endl;
+timer->printTimes();
+#endif
+
+
+double sum = 0.0;
+timer->start();
+for(auto i=0;i<10000;++i){
+  sum += c1.trace();
+}
+timer->stop(Timings::BCSR_TRACE);
+std::cout << "NEW summed trace is " << sum << std::endl;
+timer->printTimes();
 
 
 

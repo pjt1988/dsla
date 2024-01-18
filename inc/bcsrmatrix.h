@@ -3,7 +3,9 @@
 
 #include "imatrix.h"
 #include "densematrix.h"
+#include "enums.h"
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -40,7 +42,7 @@ namespace DSLA{
     void copyFromDense(const DenseMatrix& rhs);
     void copyFromBCSR(const BCSRMatrix& rhs);
     void copyFromBCSR2(const BCSRMatrix& rhs);
-    void generateBlocking(const size_t blockDim, const double* mat, const bool screen = true);
+    void generateBlocking(const size_t blockSize, const double* mat, const bool screen = true);
     void recompress();
     void clear();
     void zero();
@@ -57,8 +59,13 @@ namespace DSLA{
     void scale(const double fac);
     void add(const BCSRMatrix& rhs);
     void sub(const BCSRMatrix& rhs);
+    void mult(BCSRMatrix& A, BCSRMatrix& B, const MatMultMode mode = MatMultMode::NN, const double alpha = 1.0, const double beta = 0.0) {} // this = alpha * A * B + beta * this
+    void transpose_in_place();
+    double trace() const;
+    void add_to_diag(const double val, const bool rebuildVecs=false); //performs A = A + c*I
+    void add_to_diag(const std::vector<double>& vals, const bool rebuildVecs=false); //performs A = A + vec*I
     std::pair<double,double> gershgorinEstimate() const;
-    std::pair<double,double> gershgorinEstimate_old() const;
+
   
   private:
     std::vector<size_t> _rowPtr;

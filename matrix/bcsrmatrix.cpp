@@ -141,7 +141,7 @@ namespace DSLA{
       colIndxLoc[i].reserve(_nbrX);
       for(auto j=0ul;j<_nbrX;++j){
         if(_bNorms[i*_nbrY+j] > 0.0){
-          colIndxLoc[i].push_back(j);
+          colIndxLoc[i].emplace_back(j);
         }
       }
     }

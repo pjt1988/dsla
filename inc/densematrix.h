@@ -24,6 +24,14 @@ namespace DSLA{
 
     template <typename T>
     void copy(const T& rhs);
+
+    //linalg
+    void add(const DenseMatrix& rhs);
+    void sub(const DenseMatrix& rhs);
+    void scale(const double val);
+    double trace() const;
+    double norm() const;
+
   private:
     
   
