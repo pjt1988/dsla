@@ -47,6 +47,8 @@ namespace DSLA{
 
   BCSRMatrix::~BCSRMatrix(){
     freeBuf();
+    delete[] _buffer;
+    _buffer = nullptr;
   }
 
 
@@ -94,8 +96,9 @@ namespace DSLA{
           std::cout << "  ";
         }
         if(_buffer[bRow * _nbrY + bCol] == nullptr){
-          for(size_t k = 0; k<_blockSize;++k)
+          for(size_t k = 0; k<_blockSize;++k){
             std::cout << " 0.000 ";
+          }
           j+=_blockSize;
         }else{
           if(_buffer[bRow * _nbrY + bCol][rCount * _blockSize + cCount] >= 0)
@@ -121,10 +124,9 @@ namespace DSLA{
       for(auto i=0u;i<_nbrX*_nbrY;++i){
         if(_buffer[i] != nullptr){
           delete[] _buffer[i];
+          _buffer[i]=nullptr;
         }
       }
-      delete[] _buffer;
-      _buffer = nullptr;
     }
   }
 
@@ -158,21 +160,26 @@ namespace DSLA{
     _nbrX = _ncol % blockDim == 0 ? _ncol / blockDim : _ncol / blockDim + 1;
     _nbrY = _nrow % blockDim == 0 ? _nrow / blockDim : _nrow / blockDim + 1;
 
-    printf("nbrx,nbry %lu %lu \n", _nbrX, _nbrY);
-
     if(_buffer == nullptr){
       _buffer = new double*[_nbrX*_nbrY];
     }
 
-    const auto bDim{_blockSize * _blockSize};
-    const auto thresh{Settings::Instance()->getSparsityThresh()};
-  
     _rowPtr.resize(_nbrY + 1);
     std::fill(_rowPtr.begin(), _rowPtr.end(), 0);
     _colIndx.clear();
     _colIndx.reserve(_nbrX*_nbrY);
     _bNorms.resize(_nbrX*_nbrY);
     std::fill(_bNorms.begin(), _bNorms.end(), 0.0);
+    if(mat == nullptr){
+      for(auto i=0ul;i<_nbrX*_nbrY;++i){
+        _buffer[i] = nullptr;
+      }
+      return;
+    }
+
+    const auto bDim{_blockSize * _blockSize};
+    const auto thresh{Settings::Instance()->getSparsityThresh()};
+
     std::vector<std::vector<size_t> > colIndxLoc(_nbrY);
     const auto nt = omp_get_num_threads() > (int)_nbrY ? omp_get_num_threads() : (int)_nbrY;
 
@@ -255,11 +262,15 @@ namespace DSLA{
   }
 
 
-  void BCSRMatrix::clear(){
+  void BCSRMatrix::clear(const bool clearBuffer){
     std::fill(_rowPtr.begin(), _rowPtr.end(), 0);
     _colIndx.clear();
     std::fill(_bNorms.begin(), _bNorms.end(), 0.0);
     freeBuf();
+    if(clearBuffer){
+      delete[] _buffer;
+      _buffer = nullptr;
+    }
   }
 
 
@@ -290,7 +301,7 @@ namespace DSLA{
 
 
   void BCSRMatrix::read(const std::string& iFile){
-    clear(); 
+    clear(true); 
     FILE* fd{fopen(iFile.c_str(),"r")};
     if (fd == NULL){
       printf("Filename: '%s'\n",iFile.c_str());
@@ -306,13 +317,10 @@ namespace DSLA{
     }
     _rowPtr.resize(_nbrY+1);
     _bNorms.resize(_nbrY * _nbrY);
-    if(_buffer == nullptr){
+
     _buffer = new double*[_nbrY*_nbrX];
-     for(size_t i =0;i<_nbrX*_nbrY;++i)
+    for(size_t i =0;i<_nbrX*_nbrY;++i)
       _buffer[i]=nullptr;
-    }else{
-      die("Attempting to alloc existing matrix");
-    }
 
     //read key vectors
     if(fread(&(_rowPtr[0]), _rowPtr.size() * sizeof(size_t), 1,fd)   != 1)
@@ -397,14 +405,14 @@ namespace DSLA{
 
 
   void BCSRMatrix::copyFromDense(const DenseMatrix& rhs){
-    clear();
+    clear(true);
     generateBlocking(_blockSize, rhs.getBuffer(), true);
   }
 
 
   void BCSRMatrix::copyFromBCSR(const BCSRMatrix& rhs){
     if(rhs._nbrX != _nbrX || rhs._nbrY != _nbrY || rhs._blockSize != _blockSize)
-      clear();
+      clear(true);
 
     _nrow = rhs._nrow;
     _ncol = rhs._ncol;
@@ -414,6 +422,7 @@ namespace DSLA{
     _rowPtr = rhs._rowPtr;
     _colIndx = rhs._colIndx;
     _bNorms = rhs._bNorms;
+    _matrixNorm = rhs._matrixNorm;
 
     const auto rhsBuffer = rhs.getBuffer();
     const auto dim = _nbrX * _nbrY;
@@ -452,6 +461,7 @@ namespace DSLA{
     _rowPtr = rhs._rowPtr;
     _colIndx = rhs._colIndx;
     _bNorms = rhs._bNorms;
+    _matrixNorm = rhs._matrixNorm;
 
     const auto rhsBuffer = rhs.getBuffer();
     const auto dim = _nbrX * _nbrY;
@@ -472,6 +482,70 @@ namespace DSLA{
         memcpy(_buffer[i*_nbrY+col], rhsBuffer[i*_nbrY+col], bDimSize);
       }
     }
+  }
+
+  void BCSRMatrix::savePixmap(const std::string& oFile) const{
+          
+    FILE* of = fopen(oFile.c_str(),"w");
+
+    /*
+    
+      Legend:
+      -------
+    
+      white:     zero
+      lightgrey: zero, but part of submatrix
+      darkgrey:  smaller than REM_SPARS_THRESH, but larger than sigthr
+      black:     larger than REM_SPARS_THRESH
+    
+    */
+      fprintf(of,"/* XPM */\nstatic char * matrix_xpm[] = {\n\"%i %i 13 1\",\n",(int)_ncol,(int)_nrow);
+      fprintf(of,"\"a\tc #ff0000\",\n");   // > 1
+      fprintf(of,"\"b\tc #ff3300\",\n"); // > e-01
+      fprintf(of,"\"c\tc #ff3333\",\n"); // > e-02
+      fprintf(of,"\"d\tc #ff6633\",\n"); // > e-03
+      fprintf(of,"\"e\tc #ff6666\",\n"); // > e-04
+      fprintf(of,"\"f\tc #ff9966\",\n"); // > e-05
+      fprintf(of,"\"g\tc #ff9999\",\n"); // > e-06
+      fprintf(of,"\"h\tc #ffbb99\",\n"); // > e-07
+      fprintf(of,"\"i\tc #ffbbbb\",\n"); // > e-08
+      fprintf(of,"\"j\tc #ffeebb\",\n"); // > e-09
+      fprintf(of,"\"k\tc #ffeeee\",\n"); // > e-10
+      fprintf(of,"\".\tc #ffffff\",\n"); // zero
+      fprintf(of,"\"p\tc #bbbbbb\",\n"); // zero, bit part of block...
+
+      for(size_t i=0;i<_nbrY;++i){
+          // sort col-idx in key
+          for(size_t i2=0;i2<_blockSize;i2++){
+            fprintf(of,"\"");
+
+            for(size_t j=0;j<_nbrX;++j){
+              if(_buffer[i*_nbrY + j] == nullptr){
+                for(size_t j2=0;j2<_blockSize;j2++) fprintf(of,".");
+              }
+              else {
+                for(size_t j2=0;j2<_blockSize;j2++){
+                  double absval = fabs(_buffer[i*_nbrY + j][i2 + j2*_blockSize]);
+                  if (absval >= 1.e+00) fprintf(of,"a");     // the less tight one... SPARS_THRESH
+                  else if (absval >= 1.e-01) fprintf(of,"b");
+                  else if (absval >= 1.e-02) fprintf(of,"c");
+                  else if (absval >= 1.e-03) fprintf(of,"d");
+                  else if (absval >= 1.e-04) fprintf(of,"e");
+                  else if (absval >= 1.e-05) fprintf(of,"f");
+                  else if (absval >= 1.e-06) fprintf(of,"g");
+                  else if (absval >= 1.e-07) fprintf(of,"h");
+                  else if (absval >= 1.e-08) fprintf(of,"i");
+                  else if (absval >= 1.e-09) fprintf(of,"j");
+                  else if (absval >= 1.e-10) fprintf(of,"k");
+                  else fprintf(of,"p");
+                }
+              }
+            }
+            fprintf(of,"\",\n");
+          }
+      }
+      fprintf(of,"};\n");
+      fclose(of);
   }
 
 }

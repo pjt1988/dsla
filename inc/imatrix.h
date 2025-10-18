@@ -24,7 +24,7 @@ namespace DSLA{
 
 
       virtual void print() const = 0;
-      virtual void clear() = 0;
+      virtual void clear(const bool clearBuffer=false) = 0;
       virtual void zero() = 0;
       void setBuffer(Buf&& t){_buffer = std::move(t);};
       void setNBR(const size_t nbr){}
@@ -42,6 +42,7 @@ namespace DSLA{
       Buf            _buffer;
       size_t         _nrow;
       size_t         _ncol;
+      double         _matrixNorm{0.0};
   
   };
 

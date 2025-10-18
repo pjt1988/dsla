@@ -14,6 +14,7 @@ namespace DSLA{
 
   void _dadd(double* __restrict__ mat, const double* __restrict__ rhs, const size_t dim);
   void _dsub(double* __restrict__ mat, const double* __restrict__ rhs, const size_t dim);
+  void _dgemm(double* a, double* b, double* c, const double alpha, const size_t dim);
 
 
   //basic linalg functions returning the Frobenius2 norm of the result

@@ -42,16 +42,16 @@ namespace DSLA{
     void copyFromDense(const DenseMatrix& rhs);
     void copyFromBCSR(const BCSRMatrix& rhs);
     void copyFromBCSR2(const BCSRMatrix& rhs);
-    void generateBlocking(const size_t blockSize, const double* mat, const bool screen = true);
+    void generateBlocking(const size_t blockSize, const double* mat = nullptr, const bool screen = true);
     void recompress();
-    void clear();
+    void clear(const bool clearBuffer=false);
     void zero();
 
     //IO stuff
     void print() const;
     void occupancy() const;
     void savePixmapNorms(const std::string& oFile, const size_t bs) const {};
-    void savePixmap(const std::string& oFile) const {};
+    void savePixmap(const std::string& oFile) const;
     void read(const std::string& iFile);
     void write(const std::string& oFile) const;
 
@@ -59,10 +59,11 @@ namespace DSLA{
     void scale(const double fac);
     void add(const BCSRMatrix& rhs);
     void sub(const BCSRMatrix& rhs);
-    void mult(BCSRMatrix& A, BCSRMatrix& B, const MatMultMode mode = MatMultMode::NN, const double alpha = 1.0, const double beta = 0.0) {} // this = alpha * A * B + beta * this
+    void mult_old(BCSRMatrix& A, BCSRMatrix& B, const MatMultMode mode = MatMultMode::NN, const double alpha = 1.0, const double beta = 0.0);
+    void mult(BCSRMatrix& A, BCSRMatrix& B, const MatMultMode mode = MatMultMode::NN, const double alpha = 1.0, const double beta = 0.0); // this = alpha * A * B + beta * this
     void transpose_in_place();
     double trace() const;
-    void add_to_diag(const double val, const bool rebuildVecs=false); //performs A = A + c*I
+    void add_to_diag(const double val, const bool rebuildVecs=false); //performs A = A + val*I
     void add_to_diag(const std::vector<double>& vals, const bool rebuildVecs=false); //performs A = A + vec*I
     std::pair<double,double> gershgorinEstimate() const;
 
@@ -75,6 +76,7 @@ namespace DSLA{
     size_t              _nbrY;
     size_t              _blockSize;
     size_t              _id;
+  
 
     bool equalDims(const BCSRMatrix& rhs) const;
     void freeBuf();

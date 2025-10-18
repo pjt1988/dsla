@@ -1,4 +1,5 @@
 SRC_FILES := $(wildcard **/*.cpp)
+CXX := g++-12
 OBJ_FILES := $(patsubst %.cpp,%.o,$(SRC_FILES))
 LDFLAGS := -fopenmp 
 INC_DIR := inc
@@ -7,11 +8,10 @@ CXXFLAGS := -O0
 
 
 dsla: $(OBJ_FILES)
-	g++-12 $(LDFLAGS) -I$(INC_DIR) -o $@ $^
+	$(CXX) $(LDFLAGS) -I$(INC_DIR) -o $@ $^
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-	g++-12 $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
 
 clean:
 	rm -f $(OBJ_FILES) dsla
-

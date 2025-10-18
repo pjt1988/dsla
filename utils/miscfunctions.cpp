@@ -90,5 +90,16 @@ namespace DSLA{
     return sum;
   }
 
+  void _dgemm(double* a, double* b, double* c, const double alpha, const size_t dim){
+    #pragma omp parallel for
+    for(auto i=0ul;i<dim;++i){
+      for(auto j=0ul;j<dim;++j){
+        for(auto k=0ul;k<dim;++k){
+          c[i*dim+j] += alpha * a[i*dim+k] * b[k*dim+j];
+        }
+      }
+    }
+  }
+
 
 }

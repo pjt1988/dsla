@@ -259,7 +259,7 @@ namespace DSLA{
     void BCSRMatrix::add_to_diag(const double v, const bool rebuildVecs){
         const int nt{omp_get_num_threads() > (int)_nbrY ? omp_get_num_threads() : (int)_nbrY};
 
-        const double fnIncr = _blockSize * v *v;
+        const double fnIncr = _blockSize * v * v;
         
         #pragma omp parallel for num_threads(nt)
         for(size_t i=0;i<_nbrY;++i){
@@ -267,7 +267,7 @@ namespace DSLA{
             const auto& mat = _buffer[i+i*_nbrY];
             double fnSum = fnIncr;
             for(size_t j=0;j<_blockSize;++j){
-                fnSum += mat[j+j*_blockSize]*v;
+                fnSum += 2*mat[j+j*_blockSize]*v;
                 mat[j+j*_blockSize] += v;      
             }
             _bNorms[i+i*_nbrY] += fnSum;            
@@ -286,7 +286,7 @@ namespace DSLA{
             const auto& mat = _buffer[i+i*_nbrY];
             double fnSum = 0.0;
             for(size_t j=0;j<_blockSize && i*_nbrY +j < v.size();++j){
-                fnSum += (mat[j+j*_blockSize] + v[i*_nbrY + j])*v[i*_nbrY + j];
+                fnSum += (2*mat[j+j*_blockSize] + v[i*_nbrY + j])*v[i*_nbrY + j];
                 mat[j+j*_blockSize] += v[i*_nbrY + j];
             }
             _bNorms[i+i*_nbrY] += fnSum;            
@@ -294,6 +294,266 @@ namespace DSLA{
         if(rebuildIndx){
             rebuildIndxFromNorms();
         }
+    }
+
+    void BCSRMatrix::mult_old(BCSRMatrix& A, BCSRMatrix& B, const MatMultMode mode, const double alpha, const double beta){
+        using enum MatMultMode;
+        switch(mode){
+            case NN:
+                break;
+            case NT:
+                B.transpose_in_place();
+                break;
+            case TN:
+                A.transpose_in_place();
+                break;
+            case TT:
+                A.transpose_in_place();
+                B.transpose_in_place();
+                break;
+        }
+
+        const auto thresh = Settings::Instance()->getSparsityThresh();
+        const auto threshInner = Settings::Instance()->getPreScreeningInnerThresh();
+        const int nt = omp_get_num_threads() > (int)_nbrY ? omp_get_num_threads() : (int)_nbrY;
+        const double beta2{beta*beta};
+        const double alpha2{alpha*alpha};
+        const size_t dim = _blockSize * _blockSize;
+
+        const auto& arp = A._rowPtr;
+        const auto& aci = A._colIndx;
+        const auto& afn = A._bNorms;
+
+        const auto& brp = B._rowPtr;
+        const auto& bci = B._colIndx;
+        const auto& bfn = B._bNorms;
+
+        std::set<size_t>* cols = new std::set<size_t>[_nbrY];
+        if(beta == 0.0){
+            this->clear();
+        }else{
+            for(size_t i=0;i<_nbrY;++i){
+                for(size_t j=_rowPtr[i];j<_rowPtr[i+1];++j){
+                    const size_t col = _colIndx[j];
+                    cols[i].emplace_hint(cols[i].end(),col);                   
+                    if(beta != 1.0){
+                        _bNorms[col + i*_nbrY] *= beta2;
+                        _dscale(_buffer[i*_nbrY+col],dim,beta);
+                    }
+                }
+            }
+        }
+
+        //symbolic for outer screening
+        for(size_t i=0;i<_nbrY;++i){
+            for(size_t j=arp[i];j<arp[i+1];++j){
+                size_t kk=aci[j];
+                for(size_t k=brp[kk];k<brp[kk+1];++k){
+                    size_t jj=bci[k];
+                    const double prod = alpha * afn[i*_nbrY+kk] * bfn[kk*_nbrY+jj];
+                    if(prod > threshInner){
+                        if (_buffer[i*_nbrY+jj] == nullptr){ //making sure the block exists..
+                            cols[i].insert(cols[i].end(), jj);
+                            _buffer[i*_nbrY + jj] = new double[dim];
+                            std::fill(_buffer[i*_nbrY+jj],_buffer[i*_nbrY+jj]+dim,0.0);
+                        }
+                        _bNorms[i*_nbrY+jj] += prod;
+                    }
+                }
+            }
+        }
+
+
+        #pragma omp parallel for schedule(dynamic) num_threads(nt)
+        for (size_t i=0; i<_nbrY ; ++i) { 
+            for(size_t j=arp[i]; j<arp[i+1]; ++j){
+                const size_t kk = aci[j];
+                const double prescreen_loc = threshInner / afn[i*_nbrY+kk] / alpha2;
+
+                for(size_t k = brp[kk]; k<brp[kk+1]; ++k){
+                    const size_t jj = bci[k]; 
+                    if(_bNorms[i*_nbrY+jj] > thresh){
+                        if(bfn[jj+kk*_nbrY] > prescreen_loc){                    
+                            _dgemm(A._buffer[i*_nbrY+kk],B._buffer[kk*_nbrY+jj],_buffer[i*_nbrY+jj],alpha,_blockSize);
+                        }
+                    }else{
+                        if(_buffer[i*_nbrY+jj] != nullptr){
+                            cols[i].erase(jj);
+                            delete[] _buffer[i*_nbrY+jj];
+                            _buffer[i*_nbrY+jj] = nullptr;
+                            _bNorms[i*_nbrY+jj] = 0.0;
+                        }
+                    }
+                }
+            }
+
+            for(auto it = cols[i].begin(); it != cols[i].end();){
+                const size_t off1 = *it;
+                if(_bNorms[i*_nbrY+off1] > thresh){
+                    const double dot = fNorm(_buffer[i*_nbrY+off1],dim);
+                    if (dot < thresh){
+                        delete[] _buffer[i*_nbrY+off1];
+                        _buffer[i*_nbrY+off1] = nullptr;
+                        _bNorms[i*_nbrY+off1] = 0.0;
+                        cols[i].erase(off1);
+                    }else{
+                        _bNorms[i*_nbrY+off1] = dot;
+                    }
+                }
+                it++;
+            }
+        }
+
+        _rowPtr[0] = 0;
+        _colIndx.clear();
+        for(size_t i=0;i<_nbrY;++i){
+            _rowPtr[i+1] = _rowPtr[i] + cols[i].size();
+            _colIndx.insert(_colIndx.end(), cols[i].begin(), cols[i].end());
+        }
+        delete[] cols;
+
+        switch(mode){
+            case NN:
+                break;
+            case NT:
+                B.transpose_in_place();
+                break;
+            case TN:
+                A.transpose_in_place();
+                break;
+            case TT:
+                A.transpose_in_place();
+                B.transpose_in_place();
+                break;
+        }
+
+
+
+    }
+
+    void BCSRMatrix::mult(BCSRMatrix& A, BCSRMatrix& B, const MatMultMode mode, const double alpha, const double beta){
+        
+        //TODO implement initial check if norms A * B < thresh to skip the whole multiplication
+        
+        
+        
+        using enum MatMultMode;
+        switch(mode){
+            case NN:
+                break;
+            case NT:
+                B.transpose_in_place();
+                break;
+            case TN:
+                A.transpose_in_place();
+                break;
+            case TT:
+                A.transpose_in_place();
+                B.transpose_in_place();
+                break;
+        }
+
+        const auto thresh = Settings::Instance()->getSparsityThresh();
+        const auto threshInner = Settings::Instance()->getPreScreeningInnerThresh();
+        const int nt = omp_get_num_threads() > (int)_nbrY ? omp_get_num_threads() : (int)_nbrY;
+        const double beta2{beta*beta};
+        const double alpha2{alpha*alpha};
+        const size_t dim = _blockSize * _blockSize;
+
+        const auto& arp = A._rowPtr;
+        const auto& aci = A._colIndx;
+        const auto& afn = A._bNorms;
+
+        const auto& brp = B._rowPtr;
+        const auto& bci = B._colIndx;
+        const auto& bfn = B._bNorms;
+
+        if(beta == 0.0){
+            this->clear();
+        }else if(beta != 1.0){
+            for(size_t i=0;i<_nbrY;++i){
+                for(size_t j=_rowPtr[i];j<_rowPtr[i+1];++j){
+                    const size_t col = _colIndx[j];                
+                    _bNorms[col + i*_nbrY] *= beta2;
+                    _dscale(_buffer[i*_nbrY+col],dim,beta);
+                }
+            }
+        }
+
+        //symbolic for outer screening
+        for(size_t i=0;i<_nbrY;++i){
+            for(size_t j=arp[i];j<arp[i+1];++j){
+                auto kk=aci[j];
+                for(size_t k=brp[kk];k<brp[kk+1];++k){
+                    auto jj=bci[k];
+                    const double prod = alpha * afn[i*_nbrY+kk] * bfn[kk*_nbrY+jj];
+                    if(prod > threshInner){
+                        if (_buffer[i*_nbrY+jj] == nullptr){ //making sure the block exists..
+                            _buffer[i*_nbrY + jj] = new double[dim];
+                            std::fill(_buffer[i*_nbrY+jj],_buffer[i*_nbrY+jj]+dim,0.0);
+                        }
+                        _bNorms[i*_nbrY+jj] += prod;
+                    }
+                }
+            }
+        }
+
+
+        #pragma omp parallel for schedule(dynamic) num_threads(nt)
+        for (size_t i=0; i<_nbrY ; ++i) { 
+            for(size_t j=arp[i]; j<arp[i+1]; ++j){
+                const auto kk = aci[j];
+                const double prescreen_loc = threshInner / afn[i*_nbrY+kk] / alpha2;
+
+                for(size_t k = brp[kk]; k<brp[kk+1]; ++k){
+                    const auto jj = bci[k]; 
+                    if(_bNorms[i*_nbrY+jj] > thresh){
+                        if(bfn[jj+kk*_nbrY] > prescreen_loc){                    
+                            _dgemm(A._buffer[i*_nbrY+kk],B._buffer[kk*_nbrY+jj],_buffer[i*_nbrY+jj],alpha,_blockSize);
+                        }
+                    }else{
+                        if(_buffer[i*_nbrY+jj] != nullptr){
+                            delete[] _buffer[i*_nbrY+jj];
+                            _buffer[i*_nbrY+jj] = nullptr;
+                            _bNorms[i*_nbrY+jj] = 0.0;
+                        }
+                    }
+                }
+            }
+
+            for(auto off1=0ul;off1<_nbrX;++off1){
+                if(_bNorms[i*_nbrY+off1] > thresh){
+                    const auto dot = fNorm(_buffer[i*_nbrY+off1],dim);
+                    if (dot < thresh){
+                        delete[] _buffer[i*_nbrY+off1];
+                        _buffer[i*_nbrY+off1] = nullptr;
+                        _bNorms[i*_nbrY+off1] = 0.0;
+                    }else{
+                        _bNorms[i*_nbrY+off1] = dot;
+                    }
+                }
+            }
+        }
+
+        rebuildIndxFromNorms();
+
+        switch(mode){
+            case NN:
+                break;
+            case NT:
+                B.transpose_in_place();
+                break;
+            case TN:
+                A.transpose_in_place();
+                break;
+            case TT:
+                A.transpose_in_place();
+                B.transpose_in_place();
+                break;
+        }
+
+
+
     }
 
 

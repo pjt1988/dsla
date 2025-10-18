@@ -23,6 +23,8 @@ namespace DSLA{
             return "BCSR::TRANSPOSE_IN_PLACE";
         case BCSR_TRACE:
             return "BCSR::TRACE";
+        case BCSR_MULT:
+            return "BCSR::MULT";
         case MISC:
             return "Misc";
         default:

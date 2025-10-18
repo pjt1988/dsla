@@ -15,12 +15,12 @@ namespace DSLA{
     DenseMatrix(const DenseMatrix&);
 
     void print() const;
-    void clear(); 
+    void clear([[maybe_unused]] const bool clearBuffer=false); 
     void zero();
 
     void read(const std::string& iFile);
     void write(const std::string& oFile) const;
-    void savePixmap(const std::string& oFile) const {};
+    void savePixmap(const std::string& oFile) const;
 
     template <typename T>
     void copy(const T& rhs);

@@ -69,8 +69,8 @@ int main(){
   timer2->stop(Timings::BCSR_ADD);
 #endif  
 
-  auto* d2 = new DenseMatrix(15000,15000);
-  generateRandomMatrix(15000,15000,-100,100,d2->getBuffer(),true);
+  //auto* d2 = new DenseMatrix(15000,15000);
+  //generateRandomMatrix(15000,15000,-100,100,d2->getBuffer(),true);
   //auto* d3 = new DenseMatrix(20000,20000);
   //generateRandomMatrix(20000,20000,0.0,10,d3->getBuffer(),true);
 
@@ -102,9 +102,9 @@ int main(){
 #endif
 
 
-  BCSRMatrix c1(15000,15000);
-  c1.generateBlocking(250,d2->getBuffer());
-  c1.occupancy();
+  //BCSRMatrix c1(15000,15000);
+  //c1.generateBlocking(250,d2->getBuffer());
+  //c1.occupancy();
 
 #if 0
   BCSRMatrix c2(20000,20000);
@@ -186,6 +186,7 @@ int main(){
 
 #endif
 
+#if 0
 double* buf = new double[81];
 generateRandomMatrix(9,9,1.0,5.0,buf);
 for(int i=0;i<3;++i){
@@ -200,6 +201,38 @@ tmat.print();
 printf("new transpose\n\n");
 tmat.transpose_in_place();
 tmat.print();
+#endif
+double* buf = new double[16];
+double c=1.0;
+for(int i=0;i<16;++i) buf[i] = c;
+buf[0]=0.0;
+buf[1]=0.0;
+buf[4]=0.0;
+buf[5]=0.0;
+
+double* buf2 = new double[16];
+c=3.0;
+for(int i=0;i<16;++i) buf2[i] = c;
+
+BCSRMatrix A(4,4);
+A.generateBlocking(2,buf);
+
+BCSRMatrix B(4,4);
+B.generateBlocking(2,buf2);
+
+BCSRMatrix C(4,4);
+C.generateBlocking(2);
+
+printf("A\n");
+A.print();
+
+printf("B\n");
+B.print();
+
+C.mult(A,B);
+printf("C\n");
+C.print();
+
 
 
 #if 0
@@ -226,15 +259,6 @@ std::cout << "summed norm is " << sum << std::endl;
 timer->printTimes();
 #endif
 
-
-double sum = 0.0;
-timer->start();
-for(auto i=0;i<10000;++i){
-  sum += c1.trace();
-}
-timer->stop(Timings::BCSR_TRACE);
-std::cout << "NEW summed trace is " << sum << std::endl;
-timer->printTimes();
 
 
 
